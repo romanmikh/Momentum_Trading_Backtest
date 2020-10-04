@@ -37,7 +37,7 @@ Fund Momentum Strategies" can be summarised as follows:
    
 5) Updated Average True Range values are applied fortnightly (every 10 trading days), though trades only happen weekly. 
 
-In the first part of the code (lines 47 - 102) we load S&P500 data, define the momentum of a stock and rank the stocks
+In the first part of the code (lines 44 - 92) we load S&P500 data, define the momentum of a stock and rank the stocks
 within our dataset according to momenta. This is achieved using exponential regression and rolling the 90-day average:
 """
 
@@ -105,6 +105,8 @@ plt.show()
 #
 # For backtesting I have chosen the backtrader library: https://algotrading101.com/learn/backtrader-for-backtesting/
 # Backtrader iterates through historical data to evaluate our strategy in the market + simulates the execution of trades
+# Backtester allows S&P500 data to be imported directly from the Yahoo Finance API (up until ~20.02.2018) which is then
+# used to evaluate our strategy.
 
 
 # implementing the momentum indicator and our strategy - based on source code from https://teddykoker.com/
@@ -211,7 +213,8 @@ cerebro.addanalyzer(bt.analyzers.DrawDown)
 cerebro.addstrategy(Strategy)
 print('Running cerebro operations...')
 
-# add data from Yahoo Finance API. Though it has been discontinued, we can use historical data up till ~20.02.2018
+# add S&P500 data from Yahoo Finance API using the backtrader library directly . Though it has been discontinued, we
+# can use historical data up till ~20.02.2018
 SP500_Stock_Data_Sample = bt.feeds.YahooFinanceData(dataname='SPY', fromdate=datetime(2012, 2, 28),
                                                       todate=datetime(2018, 2, 28), plot=False)
 cerebro.adddata(SP500_Stock_Data_Sample)  # add S&P 500 Index
@@ -239,5 +242,3 @@ plt.show()
 # between 2012 and 2018), and with lower volatility (S&P500 maximum drawdown roughly 13.5% and Sharpe ratio 1.07).
 # While the algorithm is basic relative to modern competitive code, it can be made better by optimising various para-
 # meters, applying filters and leveraging the portfolio.
-
-
