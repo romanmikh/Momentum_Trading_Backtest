@@ -80,12 +80,11 @@ for good_performer in top_performers:
     rets = np.log(stocks_data[good_performer].iloc[end - 90: end])
     time = np.arange(len(rets))
     slope, intercept, r_value, p_value, std_err = linregress(time, rets)
-    plt.plot(np.arange(180), stocks_data[good_performer][end - 90:end + 90],
-             label=f"{good_performer}")
+    plt.plot(np.arange(180), stocks_data[good_performer][end - 90:end + 90], label=f"{good_performer}")
     if good_performer == top_performers[2]:
-        plt.plot(time, np.e ** (intercept + slope * time), color='red', label="Regression curves")  # rescale from natural log
+        plt.plot(time, np.e ** (intercept + slope * time), color='red', label="Regression curves")
     else:
-        plt.plot(time, np.e ** (intercept + slope * time), color='red')
+        plt.plot(time, np.e ** (intercept + slope * time), color='red')  # rescale from natural log
 
 print('Please close the plot to continue running the code.')
 plt.legend()
@@ -96,7 +95,7 @@ plt.show()
 # the regression plots, the stocks do not continue on the path the regression curve would suggest. This is because our
 # objective was only to order the stocks by their momenta, and not to forecast future behaviour. We have run the code
 # using a dataset of only 72 stocks (those whose acronyms begin with 'A' to save time, though the algorithm can handle
-# bigger datasets, and produces more competitive stocks when ran for the entire portfolio).
+# bigger datasets, and is more effective when ran for the entire portfolio).
 
 
 # In the second part of the code we implement the momentum indicator and our strategy, and backtest to find the Sharpe
@@ -126,7 +125,7 @@ class Momentum(bt.Indicator):
         x = np.arange(len(returns))
         slope, _null_, rvalue, _null_, _null_ = linregress(x, returns)
         annualized = (1 + slope) ** 252
-        self.lines.trend[0] = annualized * (rvalue ** 2)  # same as in part 1
+        self.lines.trend[0] = annualized * (rvalue ** 2)  # same as momentum function in part 1
 
 
 class Strategy(bt.Strategy):
@@ -211,7 +210,6 @@ cerebro.addanalyzer(bt.analyzers.SharpeRatio, riskfreerate=0.0)
 cerebro.addanalyzer(bt.analyzers.Returns)
 cerebro.addanalyzer(bt.analyzers.DrawDown)
 cerebro.addstrategy(Strategy)
-print('Running cerebro operations...')
 
 # add S&P500 data from Yahoo Finance API using the backtrader library directly . Though it has been discontinued, we
 # can use historical data up till ~20.02.2018
@@ -225,6 +223,7 @@ for company in SP500_acronyms:
         cerebro.adddata(bt.feeds.PandasData(dataname=df, plot=False))
 
 # finally, now that we have added all data and strategies to the cerebro engine:
+print('Running cerebro operations...')
 results = cerebro.run()
 
 print('Cerebro engine operations performed successfully.')
