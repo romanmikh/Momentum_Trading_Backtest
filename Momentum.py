@@ -14,7 +14,7 @@ import numpy as np
 #    https://www.quandl.com/databases/WIKIP/usage/export (warning: >450MB file)
 # - reduced Quandl data to stocks in the S&P500 only
 # - 'SP500_Stock_Data_Sample' should be downloaded from: https://github.com/romanmikh/Momentum_Trading_Backtest
-#   'SP500_Stock_Data_Sample' contains only companies beginning with 'A', to minimise download time + runtime
+#   'SP500_Stock_Data_Sample' contains only S&P500 companies beginning with 'A', to minimise download time + runtime
 
 
 """
@@ -25,15 +25,15 @@ Fund Momentum Strategies" can be summarised as follows:
    prices and the R^2 regression coefficient.
 
 2) For each stock: Position size = AccountValue*RiskFactor/AverageTrueRange_20. 
-   - AccountValue = value of the entire trading account (USD 1,000,000 used in these calculations)
+   - AccountValue = value of the entire trading account
    - RiskFactor = arbitrary number that sets a target daily impact for the stock. (10bp used in these calculations)
    - AverageTrueRange_20 = (price_max - price_min)/20, where 20 days has been chosen arbitrarily by the author
  
 3) Analogous to the moving average crossover strategy, new positions will only be opened if the S&P500 is above
    its 200-day moving average.
 
-4) Positions are revised weekly according to a rank of momenta. Any stocks outside the top 20% are sold and remaining
-   cash is used to buy more stocks in the top 20%, according to the position size weightings. 
+4) Positions are revised weekly according to the ranks of momenta. Any stocks outside the top 20% are sold and remaining
+   cash is used to buy more stocks in the top 20%, according to the position size weightings from 2). 
    
 5) Updated Average True Range values are applied fortnightly (every 10 trading days), though trades only happen weekly. 
 
@@ -53,7 +53,7 @@ def momentum_func(closing_prices):
     :param closing_prices:
     :return: annualised (trading year) regression slope * regression coefficient squared
     """
-    log_closing_prices = np.log(closing_prices)  # exp. regression found by first rescaling by natural log
+    log_closing_prices = np.log(closing_prices)  # exp. regression found by first rescaling prices by natural log
     time = np.arange(len(log_closing_prices))
     slope, _null_, rvalue, _null_, _null_ = linregress(time, log_closing_prices)
     return ((1 + slope) ** 252) * (rvalue ** 2)
@@ -78,14 +78,14 @@ for good_performer in top_performers:
     max_mom_index = momenta[good_performer].idxmax()
     end = momenta[good_performer].index.get_loc(max_mom_index)
     rets = np.log(stocks_data[good_performer].iloc[end - 90: end])
-    x = np.arange(len(rets))
-    slope, intercept, r_value, p_value, std_err = linregress(x, rets)
+    time = np.arange(len(rets))
+    slope, intercept, r_value, p_value, std_err = linregress(time, rets)
     plt.plot(np.arange(180), stocks_data[good_performer][end - 90:end + 90],
              label=f"{good_performer}")
     if good_performer == top_performers[2]:
-        plt.plot(x, np.e ** (intercept + slope * x), color='red', label="Regression curves")  # rescale from natural log
+        plt.plot(time, np.e ** (intercept + slope * time), color='red', label="Regression curves")  # rescale from natural log
     else:
-        plt.plot(x, np.e ** (intercept + slope * x), color='red')
+        plt.plot(time, np.e ** (intercept + slope * time), color='red')
 
 print('Please close the plot to continue running the code.')
 plt.legend()
