@@ -68,7 +68,7 @@ for company in SP500_acronyms:
 # rank stocks according to their momenta and compare the highest 3 performers with regression plots
 n = 3
 top_performers = momenta.max().sort_values(ascending=False).index[:n]
-print(f'The {n} top performing stocks are {str(top_performers)[7:27]}.')
+print(f'The {n} top momentum performing stocks are {str(top_performers)[7:27]}.')
 
 plt.figure(figsize=(12, 8))
 plt.xlabel('Time/days')
@@ -77,9 +77,9 @@ plt.ylabel('Stock Price/USD')
 for good_performer in top_performers:
     max_mom_index = momenta[good_performer].idxmax()
     end = momenta[good_performer].index.get_loc(max_mom_index)
-    rets = np.log(stocks_data[good_performer].iloc[end - 90: end])
-    time = np.arange(len(rets))
-    slope, intercept, r_value, p_value, std_err = linregress(time, rets)
+    log_returns = np.log(stocks_data[good_performer].iloc[end - 90: end])
+    time = np.arange(len(log_returns))
+    slope, intercept, r_value, p_value, std_err = linregress(time, log_returns)
     plt.plot(np.arange(180), stocks_data[good_performer][end - 90:end + 90], label=f"{good_performer}")
     if good_performer == top_performers[2]:
         plt.plot(time, np.e ** (intercept + slope * time), color='red', label="Regression curves")
@@ -234,6 +234,8 @@ print(f"Maximum Drawdown: {results[0].analyzers.drawdown.get_analysis()['max']['
 cerebro.plot(iplot=False, figsize=(12, 8))
 print('Please close the plot to complete the execution of the code.')
 plt.show()
+
+
 
 
 # These results show that the algorithm yields a return of over 11% on average with a maximum drawdown of nearly 15%.
