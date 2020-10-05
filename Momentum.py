@@ -65,7 +65,7 @@ for company in SP500_acronyms:
     momenta[company] = stocks_data[company].rolling(90).apply(momentum_func, raw=False)
     # raw=False passes each row or column as a Series to the function
 
-# rank stocks according to their momenta and compare the highest 3 performers with regression plots
+# rank stocks according to their momenta and visually compare the highest 3 performers with regression plots
 n = 3
 top_performers = momenta.max().sort_values(ascending=False).index[:n]
 print(f'The {n} top momentum performing stocks are {str(top_performers)[7:27]}.')
@@ -74,20 +74,21 @@ plt.figure(figsize=(12, 8))
 plt.xlabel('Time/days')
 plt.ylabel('Stock Price/USD')
 
-for good_performer in top_performers:
-    max_mom_index = momenta[good_performer].idxmax()
-    end = momenta[good_performer].index.get_loc(max_mom_index)
-    log_returns = np.log(stocks_data[good_performer].iloc[end - 90: end])
+for stock in top_performers:
+    max_mom_index = momenta[stock].idxmax()
+    end = momenta[stock].index.get_loc(max_mom_index)
+    log_returns = np.log(stocks_data[stock].iloc[end - 90: end])
     time = np.arange(len(log_returns))
     slope, intercept, r_value, p_value, std_err = linregress(time, log_returns)
-    plt.plot(np.arange(180), stocks_data[good_performer][end - 90:end + 90], label=f"{good_performer}")
-    if good_performer == top_performers[2]:
+    plt.plot(np.arange(180), stocks_data[stock][end - 90:end + 90], label=f"{stock}")
+    if stock == top_performers[2]:
         plt.plot(time, np.e ** (intercept + slope * time), color='red', label="Regression curves")
     else:
         plt.plot(time, np.e ** (intercept + slope * time), color='red')  # rescale from natural log
 
 print('Please close the plot to continue running the code.')
 plt.legend()
+plt.grid()
 plt.show()
 
 
@@ -95,10 +96,10 @@ plt.show()
 # the regression plots, the stocks do not continue on the path the regression curve would suggest. This is because our
 # objective was only to order the stocks by their momenta, and not to forecast future behaviour. We have run the code
 # using a dataset of only 72 stocks (those whose acronyms begin with 'A' to save time, though the algorithm can handle
-# bigger datasets, and is more effective when ran for the entire portfolio).
+# bigger datasets, and is more insightful when ran for the entire S&P500 portfolio).
 
 
-# In the second part of the code we implement the momentum indicator and our strategy, and backtest to find the Sharpe
+# In this second part of the code we implement the momentum indicator and our strategy, and backtest to find the Sharpe
 # ratio, normalised annual return and maximum drawdown of the strategy. We begin by defining momentum (as before) and
 # our strategy as classes, according to the 5 axioms stated in the introduction.
 #
@@ -110,124 +111,130 @@ plt.show()
 
 # implementing the momentum indicator and our strategy - based on source code from https://teddykoker.com/
 
-class Momentum(bt.Indicator):
+class Momentum_indicator(bt.Indicator):
     lines = ('trend',)
     params = (('period', 90),)
 
     def __init__(self):
         self.addminperiod(self.params.period)
 
-    def next(self):
+    def regression(self):
         """
         :return: annualised (trading year) regression slope * regression coefficient squared
         """
         returns = np.log(self.data.get(size=self.p.period))
-        x = np.arange(len(returns))
-        slope, _null_, rvalue, _null_, _null_ = linregress(x, returns)
+        time = np.arange(len(returns))
+        slope, _null_, rvalue, _null_, _null_ = linregress(time, returns)
         annualized = (1 + slope) ** 252
         self.lines.trend[0] = annualized * (rvalue ** 2)  # same as momentum function in part 1
 
 
-class Strategy(bt.Strategy):
+class Momentum_strategy(bt.Strategy):
     def __init__(self):
-        self.i = 0
-        self.inds = {}
+        """
+        Find 200-day moving average
+        """
+        self.counter = 0
+        self.indicators = dict()
         self.SP500_Stock_Data_Sample = self.datas[0]
         self.stocks_data = self.datas[1:]
-
         self.SP500_Stock_Data_Sample_sma200 = bt.indicators.SimpleMovingAverage(self.SP500_Stock_Data_Sample.close,
-                                                                                  period=200)
-        for d in self.stocks_data:
-            self.inds[d] = {}
-            self.inds[d]["momentum_func"] = Momentum(d.close, period=90)
-            self.inds[d]["sma100"] = bt.indicators.SimpleMovingAverage(d.close, period=100)
-            self.inds[d]["atr20"] = bt.indicators.ATR(d, period=20)
+                                                                                period=200)
+        for stock in self.stocks_data:
+            self.indicators[stock] = dict()
+            self.indicators[stock]["momentum_func"] = Momentum_indicator(stock.close, period=90)
+            self.indicators[stock]["simple_moving_average_100"] = bt.indicators.SimpleMovingAverage(stock.close, period=100)
+            self.indicators[stock]["average_true_range_20"] = bt.indicators.ATR(stock, period=20)
 
     def prenext(self):
         """
-        call next() even when data is not available for all SP500_acronyms
+        Call next() even when data is not available for all SP500_acronyms
         """
         self.next()
 
-    def next(self):
-        if self.i % 5 == 0:
-            self.rebalance_portfolio()  # rebalance portfolio weekly (trading)
-        if self.i % 10 == 0:
-            self.rebalance_positions()  # rebalance positions fortnightly (if momentum is outside the top 20%)
-        self.i += 1
-
     def rebalance_portfolio(self):
         """
-        only look at data that we can have indicators for
+        Ensure we only look at data that we can have indicators for, sell when outside top 20% or stock below its
+        simple_moving_average_100. Buy stocks with remaining cash.
         """
         self.rankings = list(filter(lambda d: len(d) > 100, self.stocks_data))
-        self.rankings.sort(key=lambda d: self.inds[d]["momentum_func"][0])
-        num_stocks = len(self.rankings)
+        self.rankings.sort(key=lambda d: self.indicators[d]["momentum_func"][0])
+        number_of_stocks = len(self.rankings)
 
-        # sell stocks_data based on 20% criteria
-        for i, d in enumerate(self.rankings):
+        # sell stocks outside the top 20% of momenta or stock underperforming
+        for rank, val in enumerate(self.rankings):
             if self.getposition(self.data).size:
-                if i > num_stocks * 0.2 or d < self.inds[d]["sma100"]:
-                    self.close(d)
-
+                if rank > number_of_stocks * 0.2 or val < self.indicators[val]["simple_moving_average_100"]:
+                    self.close(val)
         if self.SP500_Stock_Data_Sample < self.SP500_Stock_Data_Sample_sma200:
             return
 
-        # buy stocks_data with remaining cash
-        for i, d in enumerate(self.rankings[:int(num_stocks * 0.2)]):
+        # buy stocks with remaining cash
+        for rank, val in enumerate(self.rankings[:int(number_of_stocks * 0.2)]):
             cash = self.broker.get_cash()
             value = self.broker.get_value()
             if cash <= 0:
                 break
             if not self.getposition(self.data).size:
-                size = value * 0.001 / self.inds[d]["atr20"]
-                self.buy(d, size=size)
+                size = value * 0.001 / self.indicators[val]["average_true_range_20"] # risk_factor = 10bp
+                self.buy(val, size=size)
 
     def rebalance_positions(self):
-        num_stocks = len(self.rankings)
-
+        number_of_stocks = len(self.rankings)
         if self.SP500_Stock_Data_Sample < self.SP500_Stock_Data_Sample_sma200:
             return
 
         # rebalance all stocks_data
-        for i, d in enumerate(self.rankings[:int(num_stocks * 0.2)]):
+        for rank, val in enumerate(self.rankings[:int(number_of_stocks * 0.2)]):
             cash = self.broker.get_cash()
             value = self.broker.get_value()
             if cash <= 0:
                 break
             # using equation 2), we essentially weigh each stock according to its risk
-            size = value * 0.001 / self.inds[d]["atr20"]
-            self.order_target_size(d, size)
+            size = value * 0.001 / self.indicators[val]["average_true_range_20"]  # risk_factor = 10bp
+            self.order_target_size(val, size)
+
+    def next(self):
+        """
+        Set weekly trading and fortnightly updates of average_true_range_20
+        """
+        if self.counter % 5 == 0:
+            self.rebalance_portfolio()  # rebalance portfolio weekly (trading)
+        if self.counter % 10 == 0:
+            self.rebalance_positions()  # rebalance positions fortnightly (if momentum is outside the top 20%)
+        self.counter += 1
 
 
-print('Classes initialised.')
+print('Momentum indicator and strategy initialised.')
 
 # now we run the backtest using the cerebro engine: https://algotrading101.com/learn/backtrader-for-backtesting/
 cerebro = bt.Cerebro(stdstats=False)
 cerebro.broker.set_coc(True)
 cerebro.addobserver(bt.observers.Value)
-cerebro.addanalyzer(bt.analyzers.SharpeRatio, riskfreerate=0.0)
 cerebro.addanalyzer(bt.analyzers.Returns)
 cerebro.addanalyzer(bt.analyzers.DrawDown)
-cerebro.addstrategy(Strategy)
+cerebro.addanalyzer(bt.analyzers.SharpeRatio, riskfreerate=0.0) # set risk-free rate to 0%
+cerebro.addstrategy(Momentum_strategy)
 
-# add S&P500 data from Yahoo Finance API using the backtrader library directly . Though it has been discontinued, we
-# can use historical data up till ~20.02.2018
-SP500_Stock_Data_Sample = bt.feeds.YahooFinanceData(dataname='SPY', fromdate=datetime(2012, 2, 28),
-                                                      todate=datetime(2018, 2, 28), plot=False)
-cerebro.adddata(SP500_Stock_Data_Sample)  # add S&P 500 Index
+# add S&P500 data from Yahoo Finance API using the backtrader library directly. Though it has been discontinued, we
+# can use historical data up till roughly 2018. 2013.07.1 is roughly the earliest 'SP500_Stock_Data_Sample' goes back.
+SP500_Stock_Data_Sample = bt.feeds.YahooFinanceData(dataname='SPY', fromdate=datetime(2013, 7, 1),
+                                                    todate=datetime(2018, 1, 1))
+cerebro.adddata(SP500_Stock_Data_Sample)
 
 for company in SP500_acronyms:
     df = pd.read_csv(f"SP500_Stock_Data_Sample/{company}.csv", parse_dates=True, index_col=0)
     if len(df) > 100:  # data must be long enough to compute 100 day SMA
         cerebro.adddata(bt.feeds.PandasData(dataname=df, plot=False))
+    else:
+        continue
 
 # finally, now that we have added all data and strategies to the cerebro engine:
-print('Running cerebro operations...')
+print('Running cerebro engine operations...')
 results = cerebro.run()
 
 print('Cerebro engine operations performed successfully.')
-print(f"Sharpe ratio achieved: {results[0].analyzers.sharperatio.get_analysis()['sharperatio']:.3f}")
+print(f"Sharpe Ratio achieved: {results[0].analyzers.sharperatio.get_analysis()['sharperatio']:.3f}")
 print(f"Normalised Annual Return: {results[0].analyzers.returns.get_analysis()['rnorm100']:.2f}%")
 print(f"Maximum Drawdown: {results[0].analyzers.drawdown.get_analysis()['max']['drawdown']:.2f}%")
 
@@ -235,11 +242,13 @@ cerebro.plot(iplot=False, figsize=(12, 8))
 print('Please close the plot to complete the execution of the code.')
 plt.show()
 
-
-
-
-# These results show that the algorithm yields a return of over 11% on average with a maximum drawdown of nearly 15%.
-# This underperformed the S&P500 over the same time period (compound annual growth rate of roughly 12.70% for the S&P500
-# between 2012 and 2018), and with lower volatility (S&P500 maximum drawdown roughly 13.5% and Sharpe ratio 1.07).
+# These results show that the algorithm yields a return of 10.49% on average with a maximum drawdown of 16.23% and
+# Sharpe ratio of 1.666. This underperformed the S&P500 over the same time period (compound annual growth rate of
+# roughly 12.70% for the S&P500 between 2013 and 2018), and with lower volatility (S&P500 maximum drawdown roughly
+# 13.5% and Sharpe ratio 1.07).
+#
+# With the full S&P500 dataset, we would expect a normalised annual return of 16.51%, a maximum drawdown of 12.93%
+# and a Sharpe ratio of 1.426.
+#
 # While the algorithm is basic relative to modern competitive code, it can be made better by optimising various para-
 # meters, applying filters and leveraging the portfolio.
