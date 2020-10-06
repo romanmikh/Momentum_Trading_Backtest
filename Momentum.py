@@ -1,6 +1,6 @@
 from scipy.stats import linregress
-import matplotlib.pyplot as plt
 from datetime import datetime
+import matplotlib.pyplot as plt
 import backtrader as bt
 import pandas as pd
 import numpy as np
@@ -45,7 +45,6 @@ within our dataset according to momenta. This is achieved using exponential regr
 SP500_acronyms = pd.read_csv('SP500_Stock_Data_Sample/SP500_acronyms.csv', header=None)[1].tolist()
 stocks_data = ((pd.concat([pd.read_csv(f"SP500_Stock_Data_Sample/{company}.csv", index_col='date', parse_dates=True)
                            ['close'].rename(company) for company in SP500_acronyms], axis=1, sort=True)))
-
 
 # define a function to quantify momentum, to then apply 90-day rolling calculation
 def momentum_func(closing_prices):
@@ -95,7 +94,7 @@ plt.show()
 # We observe a close match between the regression plots and their corresponding stocks. Outside of the 90 day range of
 # the regression plots, the stocks do not continue on the path the regression curve would suggest. This is because our
 # objective was only to order the stocks by their momenta, and not to forecast future behaviour. We have run the code
-# using a dataset of only 72 stocks (those whose acronyms begin with 'A' to save time, though the algorithm can handle
+# using a dataset of only 51 stocks (those whose acronyms begin with 'A' to save time, though the algorithm can handle
 # bigger datasets, and is more insightful when ran for the entire S&P500 portfolio).
 
 
@@ -111,11 +110,11 @@ plt.show()
 
 # implementing the momentum indicator and our strategy - based on source code from https://teddykoker.com/
 
-class Momentum_indicator(bt.Indicator):
+class Momentum_indicator(bt.Indicator):  # method in a class?
     lines = ('trend',)
-    params = (('period', 90),)
+    params = (('period', 90),)  # rolling defined in params by 90 min period
 
-    def __init__(self):
+    def __init__(self):  # constructor, no arguments? Should take attributes to be passed into class later? But indic?
         self.addminperiod(self.params.period)
 
     def regression(self):
@@ -128,21 +127,20 @@ class Momentum_indicator(bt.Indicator):
         annualized = (1 + slope) ** 252
         self.lines.trend[0] = annualized * (rvalue ** 2)  # same as momentum function in part 1
 
-
 class Momentum_strategy(bt.Strategy):
-    def __init__(self):
+    def __init__(self):  # constructor
         """
         Find 200-day moving average
         """
         self.counter = 0
         self.indicators = dict()
         self.SP500_Stock_Data_Sample = self.datas[0]
-        self.stocks_data = self.datas[1:]
+        self.stocks_data = self.datas[1:]  # ignore header
         self.SP500_Stock_Data_Sample_sma200 = bt.indicators.SimpleMovingAverage(self.SP500_Stock_Data_Sample.close,
                                                                                 period=200)
         for stock in self.stocks_data:
-            self.indicators[stock] = dict()
-            self.indicators[stock]["momentum_func"] = Momentum_indicator(stock.close, period=90)
+            self.indicators[stock] = dict()  # make a dictionary of indicators, key = ind, value comes from Mom class and backtrader
+            self.indicators[stock]["momentum_func"] = Momentum_indicator(stock.close, period=90)  # close stock after 90 days?
             self.indicators[stock]["simple_moving_average_100"] = bt.indicators.SimpleMovingAverage(stock.close, period=100)
             self.indicators[stock]["average_true_range_20"] = bt.indicators.ATR(stock, period=20)
 
@@ -150,39 +148,39 @@ class Momentum_strategy(bt.Strategy):
         """
         Call next() even when data is not available for all SP500_acronyms
         """
-        self.next()
+        self.next()  # keeps wheels rolling
 
     def rebalance_portfolio(self):
         """
         Ensure we only look at data that we can have indicators for, sell when outside top 20% or stock below its
         simple_moving_average_100. Buy stocks with remaining cash.
         """
-        self.rankings = list(filter(lambda d: len(d) > 100, self.stocks_data))
-        self.rankings.sort(key=lambda d: self.indicators[d]["momentum_func"][0])
+        self.rankings = list(filter(lambda stock: len(stock) > 100, self.stocks_data))  # remove stocks with < 100 days
+        self.rankings.sort(key=lambda stock: self.indicators[stock]["momentum_func"][0])  # sort by momenta
         number_of_stocks = len(self.rankings)
 
         # sell stocks outside the top 20% of momenta or stock underperforming
         for rank, val in enumerate(self.rankings):
-            if self.getposition(self.data).size:
+            if self.getposition(self.data).size:  # sell/close(val) if outside top 20% or if below 100-day avg
                 if rank > number_of_stocks * 0.2 or val < self.indicators[val]["simple_moving_average_100"]:
-                    self.close(val)
+                    self.close(val)  # closes opened file
         if self.SP500_Stock_Data_Sample < self.SP500_Stock_Data_Sample_sma200:
-            return
+            return  # do nothing if total portfolio is below its average (?)
 
         # buy stocks with remaining cash
-        for rank, val in enumerate(self.rankings[:int(number_of_stocks * 0.2)]):
-            cash = self.broker.get_cash()
-            value = self.broker.get_value()
+        for rank, val in enumerate(self.rankings[:int(number_of_stocks * 0.2)]):  # enumerate for top 20%
+            cash = self.broker.get_cash()  # cash available, broker(bt) method
+            value = self.broker.get_value()  # not specified where from?
             if cash <= 0:
                 break
-            if not self.getposition(self.data).size:
+            if not self.getposition(self.data).size:  # determining position size based on formula
                 size = value * 0.001 / self.indicators[val]["average_true_range_20"] # risk_factor = 10bp
                 self.buy(val, size=size)
 
     def rebalance_positions(self):
         number_of_stocks = len(self.rankings)
         if self.SP500_Stock_Data_Sample < self.SP500_Stock_Data_Sample_sma200:
-            return
+            return  # check
 
         # rebalance all stocks_data
         for rank, val in enumerate(self.rankings[:int(number_of_stocks * 0.2)]):
@@ -192,7 +190,7 @@ class Momentum_strategy(bt.Strategy):
                 break
             # using equation 2), we essentially weigh each stock according to its risk
             size = value * 0.001 / self.indicators[val]["average_true_range_20"]  # risk_factor = 10bp
-            self.order_target_size(val, size)
+            self.order_target_size(val, size)  # give target size,
 
     def next(self):
         """
@@ -228,6 +226,8 @@ for company in SP500_acronyms:
         cerebro.adddata(bt.feeds.PandasData(dataname=df, plot=False))
     else:
         continue
+# why our data?
+
 
 # finally, now that we have added all data and strategies to the cerebro engine:
 print('Running cerebro engine operations...')
