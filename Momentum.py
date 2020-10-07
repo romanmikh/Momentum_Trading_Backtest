@@ -28,17 +28,18 @@ Fund Momentum Strategies" can be summarised as follows:
    - AccountValue = value of the entire trading account
    - RiskFactor = arbitrary number that sets a target daily impact for the stock. (10bp used in these calculations)
    - AverageTrueRange_20 = (price_max - price_min)/20, where 20 days has been chosen arbitrarily by the author
- 
+
 3) Analogous to the moving average crossover strategy, new positions will only be opened if the S&P500 is above
-   its 200-day moving average.
+   its 200-day moving average. In addition, stock is bought only if it is trading above its 100-day average. Long only.
 
 4) Positions are revised weekly according to the ranks of momenta. Any stocks outside the top 20% are sold and remaining
    cash is used to buy more stocks in the top 20%, according to the position size weightings from 2). 
-   
-5) Updated Average True Range values are applied fortnightly (every 10 trading days), though trades only happen weekly. 
 
-In the first part of the code (lines 44 - 92) we load S&P500 data, define the momentum of a stock and rank the stocks
-within our dataset according to momenta. This is achieved using exponential regression and rolling the 90-day average:
+6) Updated Average True Range values are applied fortnightly (every 10 trading days), though trades only happen weekly. 
+
+In the first part of the code (lines 46 - 95) we load S&P500 data, define the momentum of a stock and rank the stocks
+within our dataset according to momenta. This is achieved using exponential regression over a rolling 90-day average 
+and will form the basis of our strategy, which is implemented in the second part of the code:
 """
 
 # load the directory 'SP500_Stock_Data_Sample', available at https://github.com/romanmikh/Momentum_Trading_Backtest
@@ -47,7 +48,10 @@ stocks_data = ((pd.concat([pd.read_csv(f"SP500_Stock_Data_Sample/{company}.csv",
                            ['close'].rename(company) for company in SP500_acronyms], axis=1, sort=True)))
 
 # define a function to quantify momentum, to then apply 90-day rolling calculation
-def momentum_func(closing_prices):
+annual_trading_days = 252
+
+
+def momentum_func(closing_prices: pd.Series):
     """
     :param closing_prices:
     :return: annualised (trading year) regression slope * regression coefficient squared
@@ -55,16 +59,16 @@ def momentum_func(closing_prices):
     log_closing_prices = np.log(closing_prices)  # exp. regression found by first rescaling prices by natural log
     time = np.arange(len(log_closing_prices))
     slope, _null_, rvalue, _null_, _null_ = linregress(time, log_closing_prices)
-    return ((1 + slope) ** 252) * (rvalue ** 2)
+    return ((1 + slope) ** annual_trading_days) * (rvalue ** 2)
 
 
 # calculate 90-day roll of all stocks in stocks_data using momentum_func
 momenta = stocks_data.copy(deep=True)  # deep=True copies indices
 for company in SP500_acronyms:
     momenta[company] = stocks_data[company].rolling(90).apply(momentum_func, raw=False)
-    # raw=False passes each row or column as a Series to the function
 
-# rank stocks according to their momenta and visually compare the highest 3 performers with regression plots
+
+# to visualise, rank stocks according to their momenta and compare the highest 3 performers with their regression plots
 n = 3
 top_performers = momenta.max().sort_values(ascending=False).index[:n]
 print(f'The {n} top momentum performing stocks are {str(top_performers)[7:27]}.')
@@ -74,12 +78,12 @@ plt.xlabel('Time/days')
 plt.ylabel('Stock Price/USD')
 
 for stock in top_performers:
-    max_mom_index = momenta[stock].idxmax()
-    end = momenta[stock].index.get_loc(max_mom_index)
+    max_mom_index = momenta[stock].idxmax()  # ID that has led to the max value
+    end = momenta[stock].index.get_loc(max_mom_index)  # end of regression period
     log_returns = np.log(stocks_data[stock].iloc[end - 90: end])
     time = np.arange(len(log_returns))
     slope, intercept, r_value, p_value, std_err = linregress(time, log_returns)
-    plt.plot(np.arange(180), stocks_data[stock][end - 90:end + 90], label=f"{stock}")
+    plt.plot(np.arange(180), stocks_data[stock][end - 90:end + 90], label=f"{stock}")  # centered on end of regression
     if stock == top_performers[2]:
         plt.plot(time, np.e ** (intercept + slope * time), color='red', label="Regression curves")
     else:
@@ -91,6 +95,10 @@ plt.grid()
 plt.show()
 
 
+# say this is a base for a strategy to ge tth highest prformign stocsk per day (the fucntion norb nearly made)
+# and say that'd be bad so we developed rebalancing etc (a strategy)
+
+
 # We observe a close match between the regression plots and their corresponding stocks. Outside of the 90 day range of
 # the regression plots, the stocks do not continue on the path the regression curve would suggest. This is because our
 # objective was only to order the stocks by their momenta, and not to forecast future behaviour. We have run the code
@@ -100,7 +108,7 @@ plt.show()
 
 # In this second part of the code we implement the momentum indicator and our strategy, and backtest to find the Sharpe
 # ratio, normalised annual return and maximum drawdown of the strategy. We begin by defining momentum (as before) and
-# our strategy as classes, according to the 5 axioms stated in the introduction.
+# our strategy as classes, according to the 6 axioms stated in the introduction.
 #
 # For backtesting I have chosen the backtrader library: https://algotrading101.com/learn/backtrader-for-backtesting/
 # Backtrader iterates through historical data to evaluate our strategy in the market + simulates the execution of trades
@@ -110,25 +118,26 @@ plt.show()
 
 # implementing the momentum indicator and our strategy - based on source code from https://teddykoker.com/
 
-class Momentum_indicator(bt.Indicator):  # method in a class?
+class Momentum_indicator(bt.Indicator):  # indicator defined by backtrader and expects 'lines' and 'params'
     lines = ('trend',)
-    params = (('period', 90),)  # rolling defined in params by 90 min period
+    params = (('period', 90),)
 
-    def __init__(self):  # constructor, no arguments? Should take attributes to be passed into class later? But indic?
-        self.addminperiod(self.params.period)
+    def __init__(self):  # no further args in constructor - probably metaclasses used internally in library
+        self.addminperiod(self.params.period)  # add a min period, ignore stocks with <90 days
 
     def regression(self):
         """
         :return: annualised (trading year) regression slope * regression coefficient squared
         """
-        returns = np.log(self.data.get(size=self.p.period))
+        returns = np.log(self.data.get(size=self.p.period))  # take 90 days
         time = np.arange(len(returns))
         slope, _null_, rvalue, _null_, _null_ = linregress(time, returns)
         annualized = (1 + slope) ** 252
         self.lines.trend[0] = annualized * (rvalue ** 2)  # same as momentum function in part 1
 
+
 class Momentum_strategy(bt.Strategy):
-    def __init__(self):  # constructor
+    def __init__(self):
         """
         Find 200-day moving average
         """
@@ -137,23 +146,25 @@ class Momentum_strategy(bt.Strategy):
         self.SP500_Stock_Data_Sample = self.datas[0]
         self.stocks_data = self.datas[1:]  # ignore header
         self.SP500_Stock_Data_Sample_sma200 = bt.indicators.SimpleMovingAverage(self.SP500_Stock_Data_Sample.close,
-                                                                                period=200)
+                                                                                period=200)  # moving avg of universe
         for stock in self.stocks_data:
-            self.indicators[stock] = dict()  # make a dictionary of indicators, key = ind, value comes from Mom class and backtrader
-            self.indicators[stock]["momentum_func"] = Momentum_indicator(stock.close, period=90)  # close stock after 90 days?
-            self.indicators[stock]["simple_moving_average_100"] = bt.indicators.SimpleMovingAverage(stock.close, period=100)
+            self.indicators[
+                stock] = dict()  # make a dictionary of indicators, key = ind, value comes from Mom class and backtrader
+            self.indicators[stock]["momentum_func"] = Momentum_indicator(stock.close, period=90)  # 90-day roll
+            self.indicators[stock]["simple_moving_average_100"] = bt.indicators.SimpleMovingAverage(
+                                                        stock.close, period=100)  # moving average of individual stocks
             self.indicators[stock]["average_true_range_20"] = bt.indicators.ATR(stock, period=20)
 
     def prenext(self):
         """
         Call next() even when data is not available for all SP500_acronyms
         """
-        self.next()  # keeps wheels rolling
+        self.next()
 
-    def rebalance_portfolio(self):
+    def rebalance_portfolio(self):  # during rebalance_portfolio we can invest more money into new positions
         """
-        Ensure we only look at data that we can have indicators for, sell when outside top 20% or stock below its
-        simple_moving_average_100. Buy stocks with remaining cash.
+        Filter stocks by min length, sell when outside top 20% or stock below its simple_moving_average_100. Buy stocks
+        with remaining cash.
         """
         self.rankings = list(filter(lambda stock: len(stock) > 100, self.stocks_data))  # remove stocks with < 100 days
         self.rankings.sort(key=lambda stock: self.indicators[stock]["momentum_func"][0])  # sort by momenta
@@ -161,26 +172,28 @@ class Momentum_strategy(bt.Strategy):
 
         # sell stocks outside the top 20% of momenta or stock underperforming
         for rank, val in enumerate(self.rankings):
-            if self.getposition(self.data).size:  # sell/close(val) if outside top 20% or if below 100-day avg
+            if self.getposition(self.data).size:  # sell if outside top 20% or if below 100-day avg
                 if rank > number_of_stocks * 0.2 or val < self.indicators[val]["simple_moving_average_100"]:
-                    self.close(val)  # closes opened file
+                    self.close(val)  # closes position, val is the stock/ticker
+
         if self.SP500_Stock_Data_Sample < self.SP500_Stock_Data_Sample_sma200:
-            return  # do nothing if total portfolio is below its average (?)
+            return  # do nothing if total portfolio is below its 200-day average, long only portfolio
 
         # buy stocks with remaining cash
         for rank, val in enumerate(self.rankings[:int(number_of_stocks * 0.2)]):  # enumerate for top 20%
-            cash = self.broker.get_cash()  # cash available, broker(bt) method
-            value = self.broker.get_value()  # not specified where from?
+            cash = self.broker.get_cash()  # cash available
+            value = self.broker.get_value()  # value of whole portfolio
             if cash <= 0:
                 break
-            if not self.getposition(self.data).size:  # determining position size based on formula
-                size = value * 0.001 / self.indicators[val]["average_true_range_20"] # risk_factor = 10bp
+            if not self.getposition(self.data).size:  # determining position size based on equation 2)
+                size = value * 0.001 / self.indicators[val]["average_true_range_20"]  # risk_factor = 10bp
                 self.buy(val, size=size)
 
-    def rebalance_positions(self):
+    def rebalance_positions(self):  # don't put any new money into portfolio, only reshift top 20 weights around
+        # according to changing ATR
         number_of_stocks = len(self.rankings)
         if self.SP500_Stock_Data_Sample < self.SP500_Stock_Data_Sample_sma200:
-            return  # check
+            return
 
         # rebalance all stocks_data
         for rank, val in enumerate(self.rankings[:int(number_of_stocks * 0.2)]):
@@ -190,7 +203,7 @@ class Momentum_strategy(bt.Strategy):
                 break
             # using equation 2), we essentially weigh each stock according to its risk
             size = value * 0.001 / self.indicators[val]["average_true_range_20"]  # risk_factor = 10bp
-            self.order_target_size(val, size)  # give target size,
+            self.order_target_size(val, size)  # give target size to rebalance, no new money added
 
     def next(self):
         """
@@ -199,7 +212,7 @@ class Momentum_strategy(bt.Strategy):
         if self.counter % 5 == 0:
             self.rebalance_portfolio()  # rebalance portfolio weekly (trading)
         if self.counter % 10 == 0:
-            self.rebalance_positions()  # rebalance positions fortnightly (if momentum is outside the top 20%)
+            self.rebalance_positions()  # rebalance positions fortnightly (reshifting the top 20%)
         self.counter += 1
 
 
@@ -211,7 +224,7 @@ cerebro.broker.set_coc(True)
 cerebro.addobserver(bt.observers.Value)
 cerebro.addanalyzer(bt.analyzers.Returns)
 cerebro.addanalyzer(bt.analyzers.DrawDown)
-cerebro.addanalyzer(bt.analyzers.SharpeRatio, riskfreerate=0.0) # set risk-free rate to 0%
+cerebro.addanalyzer(bt.analyzers.SharpeRatio, riskfreerate=0.0)  # set risk-free rate to 0%, ~accurate right now
 cerebro.addstrategy(Momentum_strategy)
 
 # add S&P500 data from Yahoo Finance API using the backtrader library directly. Though it has been discontinued, we
@@ -226,8 +239,6 @@ for company in SP500_acronyms:
         cerebro.adddata(bt.feeds.PandasData(dataname=df, plot=False))
     else:
         continue
-# why our data?
-
 
 # finally, now that we have added all data and strategies to the cerebro engine:
 print('Running cerebro engine operations...')
