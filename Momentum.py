@@ -1,6 +1,6 @@
+import matplotlib.pyplot as plt  # ensure matplotlib==3.2.2 version is used, as per 'requirements.txt'
 from scipy.stats import linregress
 from datetime import datetime
-import matplotlib.pyplot as plt
 import backtrader as bt
 import pandas as pd
 import numpy as np
@@ -37,9 +37,12 @@ Fund Momentum Strategies" can be summarised as follows:
 
 6) Updated Average True Range values are applied fortnightly (every 10 trading days), though trades only happen weekly. 
 
-In the first part of the code (lines 46 - 95) we load S&P500 data, define the momentum of a stock and rank the stocks
-within our dataset according to momenta. This is achieved using exponential regression over a rolling 90-day average 
-and will form the basis of our strategy, which is implemented in the second part of the code:
+Lines 49 - 97 are the basis and visualisation of the momentum signal. For the actual implementation and backtesting - 
+skip to line 120. 
+
+In this first part, we load S&P500 data, define the momentum of a stock and rank the stocks within our dataset 
+according to momenta. This is achieved using exponential regression over a rolling 90-day average and will form 
+the basis of our strategy, which is implemented in the second part of the code:
 """
 
 # load the directory 'SP500_Stock_Data_Sample', available at https://github.com/romanmikh/Momentum_Trading_Backtest
@@ -66,7 +69,6 @@ def momentum_func(closing_prices: pd.Series):
 momenta = stocks_data.copy(deep=True)  # deep=True copies indices
 for company in SP500_acronyms:
     momenta[company] = stocks_data[company].rolling(90).apply(momentum_func, raw=False)
-
 
 # to visualise, rank stocks according to their momenta and compare the highest 3 performers with their regression plots
 n = 3
@@ -95,10 +97,6 @@ plt.grid()
 plt.show()
 
 
-# say this is a base for a strategy to ge tth highest prformign stocsk per day (the fucntion norb nearly made)
-# and say that'd be bad so we developed rebalancing etc (a strategy)
-
-
 # We observe a close match between the regression plots and their corresponding stocks. Outside of the 90 day range of
 # the regression plots, the stocks do not continue on the path the regression curve would suggest. This is because our
 # objective was only to order the stocks by their momenta, and not to forecast future behaviour. We have run the code
@@ -107,8 +105,9 @@ plt.show()
 
 
 # In this second part of the code we implement the momentum indicator and our strategy, and backtest to find the Sharpe
-# ratio, normalised annual return and maximum drawdown of the strategy. We begin by defining momentum (as before) and
-# our strategy as classes, according to the 6 axioms stated in the introduction.
+# ratio, normalised annual return and maximum drawdown of the strategy. As reference, code from https://teddykoker.com/
+# has been used. We begin by defining momentum (as before) and our strategy as classes, according to the 6 axioms stated
+# in the introduction.
 #
 # For backtesting I have chosen the backtrader library: https://algotrading101.com/learn/backtrader-for-backtesting/
 # Backtrader iterates through historical data to evaluate our strategy in the market + simulates the execution of trades
@@ -116,7 +115,7 @@ plt.show()
 # used to evaluate our strategy.
 
 
-# implementing the momentum indicator and our strategy - based on source code from https://teddykoker.com/
+# implementing the momentum indicator and outlined strategy
 
 class Momentum_indicator(bt.Indicator):  # indicator defined by backtrader and expects 'lines' and 'params'
     lines = ('trend',)
@@ -152,7 +151,7 @@ class Momentum_strategy(bt.Strategy):
                 stock] = dict()  # make a dictionary of indicators, key = ind, value comes from Mom class and backtrader
             self.indicators[stock]["momentum_func"] = Momentum_indicator(stock.close, period=90)  # 90-day roll
             self.indicators[stock]["simple_moving_average_100"] = bt.indicators.SimpleMovingAverage(
-                                                        stock.close, period=100)  # moving average of individual stocks
+                stock.close, period=100)  # moving average of individual stocks
             self.indicators[stock]["average_true_range_20"] = bt.indicators.ATR(stock, period=20)
 
     def prenext(self):
